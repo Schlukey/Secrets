@@ -3,7 +3,6 @@ const app = express();
 const dotenv = require("dotenv").config();
 const ejs = require("ejs");
 const bodyParser = require("body-parser");
-const { MongoClient } = require('mongodb');
 const mongoose = require("mongoose");
 const encrypt = require("mongoose-encryption");
 
@@ -13,20 +12,23 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.set("view engine", "ejs");
 app.set(express.static("public"));
 
-const uri = `${process.env.STRING}`;
-const client = new MongoClient(uri);
-const db = client.db("secretsDB");
-const userSchema = mongoose.Schema({
+mongoose.connect(process.env.STRING, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+});
+
+const userSchema = new mongoose.Schema({
   email: String,
   password: String,
 });
-const secret = `${process.env.SECRET}`;
-userSchema.plugin(encrypt, {
+
+const secret = process.env.SECRET;
+
+ userSchema.plugin(encrypt, {
   secret: secret,
   encryptedFields: ["password"],
 });
-const collection = db.collection("userLogs", userSchema);
-
+const Logins = new mongoose.model('logins', userSchema);
 let loginFailed;
 
 app.get("/", async (req, res) => {
@@ -41,12 +43,13 @@ app
 
   .post(async (req, res) => {
     //define the login params
-    const loginParams = {
+    const loginParams = new Logins({
       email: req.body.username,
       password: req.body.password,
-    };
+    });
     //save that into a doc on the db
-    const response = await collection.insertOne(loginParams)
+    const response = await loginParams
+      .save()
       .then(() => {
         console.log("new user added to db");
         res.redirect("login");
@@ -72,7 +75,8 @@ app
       password: req.body.password,
     };
     //check the db to find the matching document
-    const response = await collection.findOne(userLogin)
+    const response = await collection
+      .findOne(userLogin)
       .then((user) => {
         if (user.password === userLogin.password) {
           console.log("match found");
@@ -103,8 +107,9 @@ app
 
   .post(async (req, res) => {
     const userPost = { secret: req.body.secret };
-    const posts = db.collection('posts');
-    const response = await posts.insertOne(userPost)
+    const posts = mongoose.model("posts");
+    const response = await posts
+      .insertOne(userPost)
       .then(() => {
         res.redirect("secrets");
         console.log(`post saved: ${userPost}`);

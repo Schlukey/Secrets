@@ -1,126 +1,164 @@
+require("dotenv").config();
 const express = require("express");
-const app = express();
-const dotenv = require("dotenv").config();
-const ejs = require("ejs");
 const bodyParser = require("body-parser");
+const ejs = require("ejs");
 const mongoose = require("mongoose");
-const encrypt = require("mongoose-encryption");
+const session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const findOrCreate = require("mongoose-findorcreate");
 
 const port = process.env.PORT;
+const app = express();
 
-app.use(bodyParser.urlencoded({ extended: true }));
+mongoose.set("strictQuery", false);
+
 app.set("view engine", "ejs");
-app.set(express.static("public"));
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static("public"));
 
-mongoose.connect(process.env.STRING, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-});
+app.use(
+  session({
+    secret: `${process.env.SECRET}`,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {},
+  })
+);
+
+//using passport package to initialize and uses session package
+app.use(passport.initialize());
+app.use(passport.session());
+
+async function main() {
+  await mongoose.connect(`${process.env.STRING}`); //here we need to give the db name (eg : userDB)
+}
+main().catch((err) => console.log(err));
 
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,
+  googleId: String
 });
 
-const secret = process.env.SECRET;
+userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(findOrCreate);
 
- userSchema.plugin(encrypt, {
-  secret: secret,
-  encryptedFields: ["password"],
+const User = new mongoose.model("User", userSchema);
+
+passport.use(User.createStrategy());
+
+passport.serializeUser((user, done)=>{
+  done(null, user.id);
 });
-const Logins = new mongoose.model('logins', userSchema);
-let loginFailed;
 
-app.get("/", async (req, res) => {
+passport.deserializeUser((id, done)=>{
+  User.findById(id).then((user)=>{
+    done(user);
+  }).catch((err)=>{
+    console.log(err);
+  });
+});
+
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.G_CLIENT_ID,
+      clientSecret: process.env.G_SECTET,
+      callbackURL: "http://localhost:4200/auth/google/serets",
+      userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo",
+    },
+    function (accessToken, refreshToken, profile, cb) {
+      User.findOrCreate({ googleId: profile.id }, (err, user)=>{
+        return cb(err, user);
+      });
+    }
+  )
+);
+
+app.get("/", (req, res) => {
   res.render("home");
 });
 
-app
-  .route("/register")
-  .get(async (req, res) => {
-    res.render("register");
-  })
+app.get("/auth/google", async (req, res) => {
+  passport.authenticate("google", { scope: ["profile"] });
+});
 
-  .post(async (req, res) => {
-    //define the login params
-    const loginParams = new Logins({
-      email: req.body.username,
-      password: req.body.password,
+app.get(
+  "/auth/google/secrets",
+  passport.authenticate("google", { failureRedirect: "/login" })
+),
+  async (req, res) => {
+    res.redirect("/secrets");
+  };
+
+app.get("/login", (req, res) => {
+  res.render("login");
+});
+
+app.get("/register", (req, res) => {
+  res.render("register");
+});
+
+app.get("/secrets", async(req, res)=>{
+  const response = await User.find({"secret": {$ne: null}}).then((err, foundUsers)=>{
+    if (err){
+      console.log(err);
+    } else {
+      if (foundUsers) {
+        res.render("secrets", {usersWithSecrets: foundUsers});
+      }
+    }
+  });
+  return response;
+});
+
+app.post("/register", (req, res) => {
+  const username = req.body.username;
+  const password = req.body.password;
+  User.register({ username: username }, password)
+    .then(() => {
+      const authenticate = passport.authenticate("local");
+      authenticate(req, res, () => {
+        res.redirect("/secrets");
+      });
+    })
+    .catch((err) => {
+      console.log(err);
+      res.redirect("/register");
     });
-    //save that into a doc on the db
-    const response = await loginParams
-      .save()
-      .then(() => {
-        console.log("new user added to db");
-        res.redirect("login");
-      })
-      .catch((err) => {
-        console.log(err);
-        res.redirect("register");
-      });
-    return response;
+});
+
+app.post("/login", (req, res) => {
+  const newUser = new User({
+    username: req.body.username,
+    password: req.body.password,
   });
-
-app
-  .route("/login")
-  .get(async (req, res) => {
-    res.render("login", { loginFailed });
-    loginFailed = false;
-  })
-
-  .post(async (req, res) => {
-    //define search params
-    const userLogin = {
-      email: req.body.username,
-      password: req.body.password,
-    };
-    //check the db to find the matching document
-    const response = await collection
-      .findOne(userLogin)
-      .then((user) => {
-        if (user.password === userLogin.password) {
-          console.log("match found");
-          res.redirect("secrets");
-        }
-      })
-      .catch((err) => {
-        loginFailed = true;
-        console.log(`Passowrd / Email not valid: ${err}`);
-        res.redirect("login");
+  req.login(newUser, (err) => {
+    if (err) {
+      console.log(err);
+    } else {
+      passport.authenticate("local")(req, res, function () {
+        res.redirect("/secrets");
       });
-    return response;
+    }
   });
+});
 
-app
-  .route("/secrets")
-  .get(async (req, res) => {
-    res.render("secrets");
-  })
+app.get("/submit", (req, res) => {
+  res.render("submit");
+});
 
-  .post(async (req, res) => {});
-
-app
-  .route("/submit")
-  .get(async (req, res) => {
-    res.render("submit");
-  })
-
-  .post(async (req, res) => {
-    const userPost = { secret: req.body.secret };
-    const posts = mongoose.model("posts");
-    const response = await posts
-      .insertOne(userPost)
-      .then(() => {
-        res.redirect("secrets");
-        console.log(`post saved: ${userPost}`);
-      })
-      .catch((err) => {
-        console.log(err);
-        res.redirect("submit");
-      });
-    return response;
+app.get("/logout", (req, res) => {
+  req.logout(function (err) {
+    if (err) {
+      return next(err);
+    }
+    res.redirect("/");
   });
+});
 
 app.listen(port, () => {
-  console.log("we're live");
+  console.log("server running");
 });

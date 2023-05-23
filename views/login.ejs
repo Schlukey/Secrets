@@ -7,9 +7,6 @@
     <div class="col-sm-8">
       <div class="card">
         <div class="card-body">
-          <% if(loginFailed){ %>
-            <p style="color: red; font-size: 14px;">Email / Password is invalid</p>
-         <% } %>
           <!-- Makes POST request to /login route -->
           <form action="/login" method="POST">
             <div class="form-group">
@@ -26,7 +23,7 @@
       </div>
     </div>
 
-    <!-- <div class="col-sm-4">
+    <div class="col-sm-4">
       <div class="card">
         <div class="card-body">
           <a class="btn btn-block" href="/auth/google" role="button">
@@ -35,7 +32,7 @@
           </a>
         </div>
       </div>
-    </div> -->
+    </div>
 
   </div>
 </div>
